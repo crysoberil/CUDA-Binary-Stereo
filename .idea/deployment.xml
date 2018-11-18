@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="sftp://jisan@vision41.cs.unc.edu:22/usr/bin/python3" autoUploadExternalChanges="true">
+    <serverData>
+      <paths name="sftp://jisan@vision41.cs.unc.edu:22/usr/bin/python3">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/playpen/jisan/Regular/ClionProjects/Fall 18/CUDA Main/Stereo/src" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>
