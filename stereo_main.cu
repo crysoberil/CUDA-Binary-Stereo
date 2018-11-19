@@ -2,6 +2,7 @@
 #include "libpng_wrapper.h"
 #include "stereo_cpu.h"
 #include "stereo_cuda.h"
+#include "stereo_cuda_shared.h"
 
 
 void testMiddleBuryCPU() {
@@ -58,7 +59,8 @@ void stereoGPU(char* img1Path, char* img2Path, char* resultPath) {
     int width = img1.width;
     unsigned char* colors1 = get_flattened_color_array(img1);
 	unsigned char* colors2 = get_flattened_color_array(img2);
-	float* res = computeDisparityMap(colors1, colors2, height, width, 7);
+//	float* res = computeDisparityMap(colors1, colors2, height, width, 7);
+	float* res = computeDisparityMapShared(colors1, colors2, height, width);
     DoubleImage resImg;
 	resImg.init(height, width);
 	int k = 0;
