@@ -1,218 +1,300 @@
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+#include <vector_functions.h>
 #include "stereo_cuda_shared.h"
 
 
-#define SHARED_MEM_BLOCK_SIZE 32
-#define NCC_WINDOW_HEIGHT 3
-#define NCC_WINDOW_WIDTH 7
-#define COLOR_PATCH_HEIGHT (SHARED_MEM_BLOCK_SIZE + NCC_WINDOW_HEIGHT - 1)
-#define COLOR_PATCH_WIDTH (SHARED_MEM_BLOCK_SIZE + NCC_WINDOW_WIDTH - 1)
+#define USE_NCC 1
+#define USE_SQRT_APPROX 1
 
-#define NUM_COLOR_CHANNELS 3
+#define BLOCK_SIZE 32
+#define NCC_HEIGHT 3
+#define NCC_WIDTH 7
+#define HF_NCC_HEIGHT (NCC_HEIGHT / 2)
+#define HF_NCC_WIDTH (NCC_WIDTH / 2)
+#define WIDE_PATCH_H (BLOCK_SIZE + NCC_HEIGHT - 1)
+#define WIDE_PATCH_W (BLOCK_SIZE + NCC_WIDTH - 1)
+#define WIDE_PATCH_ELM (WIDE_PATCH_H * WIDE_PATCH_W)
+#define MAX_DISP (BLOCK_SIZE * 4)
+#define INFTY (1 << 29)
 
+#define NUM_CHNL 3
 
-typedef union {
-    float4 f;
-    float arr[4];
-} Float4;
+// ###################################################
 
-
-struct Problem {
-public:
-    unsigned char* img1;
-    unsigned char* img2;
-    int height, width;
-    float* res;
-
-    Problem(unsigned char* img1, unsigned char* img2, int height, int width, float* res) {
-        this->img1 = img1;
-        this->img2 = img2;
-        this->height = height;
-        this->width = width;
-        this->res = res;
-    }
-};
+__device__
+Float3 operator*(Float3 &a, float b)
+{
+    // TODO: use make_float as in (https://stackoverflow.com/questions/26676806/efficiency-of-cuda-vector-types-float2-float3-float4)
+    Float3 res;
+    res.arr[0] = a.arr[0] * b;
+    res.arr[1] = a.arr[1] * b;
+    res.arr[2] = a.arr[2] * b;
+    return res;
+}
 
 
 __device__
-void getWindowMeanSTDShared(unsigned char colorArr[COLOR_PATCH_HEIGHT][COLOR_PATCH_WIDTH][NUM_COLOR_CHANNELS], int centerRow, int centerCol, Float4 &mean, Float4 &std) {
-    Float4 windowSum;
-    windowSum.f.x = windowSum.f.y = windowSum.f.z = 0.0;
-    int windowSize = 0;
+Float3 operator-(Float3 &a, Float3 &b)
+{
+    Float3 res;
+    res.arr[0] = a.arr[0] - b.arr[0];
+    res.arr[1] = a.arr[1] - b.arr[1];
+    res.arr[2] = a.arr[2] - b.arr[2];
+    return res;
+}
 
-    int halfWindowRow = NCC_WINDOW_HEIGHT / 2;
-    int halfWindowCol = NCC_WINDOW_WIDTH / 2;
 
-    for (int r = centerRow - halfWindowRow; r <= centerRow + halfWindowRow; r++) {
-        for (int c = centerCol - halfWindowCol; c <= centerCol + halfWindowCol; c++) {
-            if (r >= 0 && r < COLOR_PATCH_HEIGHT && c >= 0 && c < COLOR_PATCH_WIDTH) {
-                for (int channel = 0; channel < 3; channel++) {
-                    windowSum.arr[channel] += colorArr[r][c][channel];
-                }
-                windowSize++;
-            }
+__device__
+Float3 operator*(Float3 a, Float3 b)
+{
+    Float3 res;
+    res.arr[0] = a.arr[0] * b.arr[0];
+    res.arr[1] = a.arr[1] * b.arr[1];
+    res.arr[2] = a.arr[2] * b.arr[2];
+    return res;
+}
+
+__device__
+float reduceSum(Float3 &a) {
+    return a.arr[0] + a.arr[1] + a.arr[2];
+}
+
+__device__
+void resetValue(Float3 &a, float val) {
+    a.arr[0] = val;
+    a.arr[1] = val;
+    a.arr[2] = val;
+}
+
+__device__
+Float3& operator+=(Float3 &first, const Float3& sec) {
+    first.arr[0] += sec.arr[0];
+    first.arr[1] += sec.arr[1];
+    first.arr[2] += sec.arr[2];
+    return first;
+}
+
+// ###################################################
+
+/* Internally synced */
+__device__
+void loadIntoBuffer(Float3* arr, Float3 buffer[][WIDE_PATCH_W], int offsetRow, int offsetCol, int imgHeight, int imgWidth) {
+    int respAlongRow = (WIDE_PATCH_H + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int respAlongCol = (WIDE_PATCH_W + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int buffIdxRow, buffIdxCol;
+    int arrIdxRow, arrIdxCol;
+    bool flag1, flag2;
+    for (int i = 0; i < respAlongRow; i++) {
+        buffIdxRow = i * BLOCK_SIZE + threadIdx.y;
+        if (buffIdxRow >= WIDE_PATCH_H)
+            break;
+        arrIdxRow = buffIdxRow + offsetRow;
+        flag1 = arrIdxRow < 0 || arrIdxRow >= imgHeight;
+        for (int j = 0; j < respAlongCol; j++) {
+            buffIdxCol = j * BLOCK_SIZE + threadIdx.x;
+            if (buffIdxCol >= WIDE_PATCH_W)
+                break;
+            arrIdxCol = buffIdxCol + offsetCol;
+            flag2 = arrIdxCol < 0 || arrIdxCol >= imgWidth;
+            if (flag1 || flag2)
+                resetValue(buffer[buffIdxRow][buffIdxCol], -1);
+            else
+                buffer[buffIdxRow][buffIdxCol] = arr[arrIdxRow * imgWidth + arrIdxCol];
         }
     }
 
-    // Compute average
-    for (int channel = 0; channel < NUM_COLOR_CHANNELS; channel++) {
-        mean.arr[channel] = windowSum.arr[channel] / windowSize;
-    }
+    __syncthreads();
+}
 
-    Float4 varSum;
-    varSum.f.x = varSum.f.y = varSum.f.z = 0.0;
 
-    for (int r = centerRow - halfWindowRow; r <= centerRow + halfWindowRow; r++) {
-        for (int c = centerCol - halfWindowCol; c <= centerCol + halfWindowCol; c++) {
-            if (r >= 0 && r < COLOR_PATCH_HEIGHT && c >= 0 && c < COLOR_PATCH_WIDTH) {
-                for (int channel = 0; channel < 3; channel++) {
-                    float diff = colorArr[r][c][channel] - mean.arr[channel];
-                    varSum.arr[channel] += diff * diff;
-                }
-            }
-        }
-    }
-
-    for (int channel = 0; channel < 3; channel++) {
-        std.arr[channel] = sqrt(varSum.arr[channel] / windowSize);
-        if (std.arr[channel] < 1e-4)
-            std.arr[channel] = 1e-4;
+__device__
+void flushBuffer(Float3 buffer[][WIDE_PATCH_W]) {
+    for (int i = 0; i < WIDE_PATCH_H; i++) {
+        for (int j = 0; j < WIDE_PATCH_W; j++)
+            printf("(%.2f, %.2f, %.2f)\t", buffer[i][j].arr[0], buffer[i][j].arr[1], buffer[i][j].arr[2]);
+        printf("\n");
     }
 }
 
 
 __device__
-float computeNCCSharedMem(unsigned char img1[COLOR_PATCH_HEIGHT][COLOR_PATCH_WIDTH][NUM_COLOR_CHANNELS], int row1, int col1,
-            unsigned char img2[COLOR_PATCH_HEIGHT][COLOR_PATCH_WIDTH][NUM_COLOR_CHANNELS], int row2, int col2) {
-    float ncc = 0.0;
-    Float4 mean1;
-    Float4 std1;
-    Float4 mean2;
-    Float4 std2;
-    getWindowMeanSTDShared(img1, row1, col1, mean1, std1);
-    getWindowMeanSTDShared(img2, row2, col2, mean2, std2);
-    int totalContribCount = 0;
-    int halfWindowRow = NCC_WINDOW_HEIGHT / 2;
-    int halfWindowCol = NCC_WINDOW_WIDTH / 2;
-    for (int rDel = -halfWindowRow; rDel <= halfWindowRow; rDel++) {
-        for (int cDel = -halfWindowCol; cDel <= halfWindowCol; cDel++) {
-            int r1 = row1 + rDel;
-            int c1 = col1 + cDel;
-            int r2 = row2 + rDel;
-            int c2 = col2 + cDel;
-            if (r1 >= 0 && r1 < COLOR_PATCH_HEIGHT && c1 >= 0 && c1 < COLOR_PATCH_WIDTH && r2 >= 0 && r2 < COLOR_PATCH_HEIGHT && c2 >= 0 && c2 < COLOR_PATCH_WIDTH) {
-                for (int channel = 0; channel < NUM_COLOR_CHANNELS; channel++) {
-                    float contrib = (img1[r1][c1][channel] - mean1.arr[channel]) * (img2[r2][c2][channel] - mean2.arr[channel]) / (std1.arr[channel] * std2.arr[channel]);
-                    ncc += contrib / NUM_COLOR_CHANNELS;  // To account for 3 channels.
-                }
-                totalContribCount++;
+float inverseSqrt(float n, int iter) {
+    if (n < 1e-5)
+        return 1e-5;
+    #if (USE_PARALLEL_DIRECTIVES)
+        float x = 0.5;
+        for (int i = 0; i < iter; i++)
+            x -= (x * x - 1.0 / n) / (2.0 * x);
+        return x;
+    #else
+        return sqrt(1.0 / n);
+    #endif
+}
+
+__device__
+void loadMeanStd(Float3 buf[][WIDE_PATCH_W], int rCenter, int cCenter, Float3 &mean, Float3 &invStd) {
+    Float3 sum;
+    resetValue(sum, 0.0);
+    int cnt = 0;
+    for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
+        for (int c = cCenter - HF_NCC_WIDTH; c <= cCenter + HF_NCC_WIDTH; c++) {
+            if (buf[r][c].arr[0] >= 0) {
+                sum += buf[r][c];
+                cnt++;
             }
         }
     }
-    float avg = ncc / totalContribCount;
-    return avg;
+
+    mean.f = (sum * (1.0 / cnt)).f;
+
+    Float3 varSum, diff;
+    resetValue(varSum, 0.0);
+    for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
+        for (int c = cCenter - HF_NCC_WIDTH; c <= cCenter + HF_NCC_WIDTH; c++) {
+            if (buf[r][c].arr[0] >= 0) {
+                diff = buf[r][c] - mean;
+                varSum += (diff * diff);
+            }
+        }
+    }
+
+    varSum.f = (varSum * (1.0 / cnt)).f;
+
+    for (int channel = 0; channel < NUM_CHNL; channel++)
+        invStd.arr[channel] = inverseSqrt(varSum.arr[channel], 4);
+}
+
+
+__device__
+float computeNCCShared(Float3 buf1[][WIDE_PATCH_W], Float3 buf2[][WIDE_PATCH_W], int r, int c1, int c2) {
+    Float3 mean1, mean2, invStd1, invStd2;
+    loadMeanStd(buf1, r, c1, mean1, invStd1);
+    loadMeanStd(buf2, r, c2, mean2, invStd2);
+    Float3 invStdMult = invStd1 * invStd2;
+
+    float nccSum = 0.0;
+    short itemCount = 0;
+    Float3 nccTerm;
+
+    for (int dr = -HF_NCC_HEIGHT; dr <= HF_NCC_HEIGHT; dr++) {
+        for (int dc = -HF_NCC_WIDTH; dc <= HF_NCC_WIDTH; dc++) {
+            if (buf1[r + dr][c1 + dc].arr[0] >= 0 && buf2[r + dr][c2 + dc].arr[0] >= 0) {
+                nccTerm = (buf1[r + dr][c1 + dc] - mean1) * (buf2[r + dr][c2 + dc] - mean2) * invStdMult;
+                nccSum += reduceSum(nccTerm);
+                itemCount += NUM_CHNL;
+            }
+        }
+    }
+
+    float ncc = nccSum / itemCount;
+    return ncc;
+}
+
+
+__device__
+float computeSSDShared(Float3 buf1[][WIDE_PATCH_W], Float3 buf2[][WIDE_PATCH_W], int r, int c1, int c2) {
+    float ssdSum = 0.0;
+    short cnt = 0;
+    Float3 diff;
+    for (int dr = -HF_NCC_HEIGHT; dr <= HF_NCC_HEIGHT; dr++) {
+        for (int dc = -HF_NCC_WIDTH; dc <= HF_NCC_WIDTH; dc++) {
+            if (buf1[r + dr][c1 + dc].arr[0] >= 0 && buf2[r + dr][c2 + dc].arr[0] >= 0) {
+                diff = buf1[r + dr][c1 + dc] - buf2[r + dr][c2 + dc];
+                diff = diff * diff;
+                ssdSum += reduceSum(diff);
+                cnt++;
+            }
+        }
+    }
+    return -ssdSum / (cnt * NUM_CHNL);
 }
 
 
 __global__
-void computeDisparityKernelShared(Problem* problem) {
-    unsigned int tx = threadIdx.x;
-    unsigned int ty = threadIdx.y;
-    unsigned int bx = blockIdx.x;
-    unsigned int by = blockIdx.y;
+void disparityKernel(Problem* problem) {
+    int br = blockIdx.y;
+    int bc = blockIdx.x;
+    int tr = threadIdx.y;
+    int tc = threadIdx.x;
     int imgHeight = problem->height;
     int imgWidth = problem->width;
+    int blockLeaderRow = br * blockDim.y;
+    int blockLeaderCol = bc * blockDim.x;
+    int row = blockLeaderRow + tr;
+    int col = blockLeaderCol + tc;
+    bool cellInvalid = row >= imgHeight || col >= imgWidth;
 
-    int blockHeadRow = SHARED_MEM_BLOCK_SIZE * by;
-    int blockHeadCol = SHARED_MEM_BLOCK_SIZE * bx;
-    int row = blockHeadRow + ty;
-    int col = blockHeadCol + tx;
+    __shared__ Float3 buffer1[WIDE_PATCH_H][WIDE_PATCH_W];
+    __shared__ Float3 buffer2[WIDE_PATCH_H][WIDE_PATCH_W];
+    // Load into shared memory
+    if (cellInvalid)
+        __syncthreads();
+    else
+        loadIntoBuffer(problem->img1, buffer1, blockLeaderRow - HF_NCC_HEIGHT, blockLeaderCol - HF_NCC_WIDTH, imgHeight, imgWidth);
 
-    if (row >= imgHeight || col >= imgWidth)
-        return;
-
-    __shared__ unsigned char color1Buffer[COLOR_PATCH_HEIGHT][COLOR_PATCH_WIDTH][NUM_COLOR_CHANNELS];
-    __shared__ unsigned char color2Buffer[COLOR_PATCH_HEIGHT][COLOR_PATCH_WIDTH][NUM_COLOR_CHANNELS];
-
-    // Now load into the shared memory.
-    int responsibilityAccrossRow = 2 + (NCC_WINDOW_HEIGHT - 2) / SHARED_MEM_BLOCK_SIZE;
-    int responsibilityAccrossCol = 2 + (NCC_WINDOW_WIDTH - 2) / SHARED_MEM_BLOCK_SIZE;
-
-    for (int i = 0; i < responsibilityAccrossRow; i++) {
-        int sharedIdxRow = responsibilityAccrossRow * ty + i;
-        int img1Row = sharedIdxRow + blockHeadRow - NCC_WINDOW_HEIGHT / 2;
-        if (img1Row < 0 || img1Row >= imgHeight || sharedIdxRow >= SHARED_MEM_BLOCK_SIZE)
+    float bestSimilarity = -1e5;
+    int dispBest = INFTY;
+    for (int disparityBlock = MAX_DISP / BLOCK_SIZE; disparityBlock >= 0; disparityBlock--) {
+        int dispStart = disparityBlock * BLOCK_SIZE;
+        int disparityBlockLeaderCol = blockLeaderCol - dispStart;
+        if (cellInvalid || disparityBlockLeaderCol < 0) {
+            __syncthreads();
+            __syncthreads();
             continue;
-        for (int j = 0; j < responsibilityAccrossCol; j++) {
-            int sharedIdxCol = responsibilityAccrossCol * tx + j;
-            int img1Col = sharedIdxCol + blockHeadCol - NCC_WINDOW_WIDTH / 2;
-            if (img1Col < 0 || img1Col >= imgWidth || sharedIdxCol >= SHARED_MEM_BLOCK_SIZE)
-                continue;
-            for (int channel = 0; channel < NUM_COLOR_CHANNELS; channel++) {
-                color1Buffer[sharedIdxRow][sharedIdxCol][channel] = problem->img1[img1Row * imgWidth * 3 + img1Col * 3 + channel];
-            }
         }
-    }
-    __syncthreads();
+        loadIntoBuffer(problem->img2, buffer2, blockLeaderRow - HF_NCC_HEIGHT, disparityBlockLeaderCol - HF_NCC_WIDTH, imgHeight, imgWidth);
 
-    float bestNCC = -1e10;
-    int bestMatchedColumn;
-
-    int columnwiseChunks = (imgWidth + SHARED_MEM_BLOCK_SIZE - 1) / SHARED_MEM_BLOCK_SIZE;
-    for (int columnwiseChunk = 0; columnwiseChunk < columnwiseChunks; columnwiseChunk++) {
-        int secondBlockHeadCol = SHARED_MEM_BLOCK_SIZE * columnwiseChunk;
-        for (int i = 0; i < responsibilityAccrossRow; i++) {
-            int sharedIdxRow = responsibilityAccrossRow * ty + i;
-            int img2Row = sharedIdxRow + blockHeadRow - NCC_WINDOW_HEIGHT / 2;
-            if (img2Row < 0 || img2Row >= imgHeight || sharedIdxRow >= SHARED_MEM_BLOCK_SIZE)
-                continue;
-            for (int j = 0; j < responsibilityAccrossCol; j++) {
-                int sharedIdxCol = responsibilityAccrossCol * tx + j;
-                int img2Col = sharedIdxCol + secondBlockHeadCol - NCC_WINDOW_WIDTH / 2;
-                if (img2Col < 0 || img2Col >= imgWidth || sharedIdxCol >= SHARED_MEM_BLOCK_SIZE)
-                    continue;
-                for (int channel = 0; channel < NUM_COLOR_CHANNELS; channel++) {
-                    color2Buffer[sharedIdxRow][sharedIdxCol][channel] = problem->img2[img2Row * imgWidth * 3 + img2Col * 3 + channel];
+        int dispEnd = dispStart - BLOCK_SIZE;
+        float similarity;
+        for (int disp = dispStart, dispDel = 0; disp > dispEnd; disp--, dispDel++) {
+            if (col >= disp && disp + tc >= 0) {
+                #if (USE_NCC)
+                    similarity = computeNCCShared(buffer1, buffer2, tr + HF_NCC_HEIGHT, tc + HF_NCC_WIDTH, dispDel + HF_NCC_WIDTH);
+                #else
+                    similarity = computeSSDShared(buffer1, buffer2, tr + HF_NCC_HEIGHT, tc + HF_NCC_WIDTH, dispDel + HF_NCC_WIDTH);
+                #endif
+                if (similarity > bestSimilarity) {
+                    bestSimilarity = similarity;
+                    dispBest = disp + tc;
                 }
             }
         }
         __syncthreads();
-
-        for (int colSecShared = 0; colSecShared < SHARED_MEM_BLOCK_SIZE && colSecShared + columnwiseChunk * SHARED_MEM_BLOCK_SIZE < imgWidth; colSecShared++) {
-            float ncc = computeNCCSharedMem(color1Buffer, ty + NCC_WINDOW_HEIGHT / 2, tx + NCC_WINDOW_WIDTH / 2, color2Buffer, ty + NCC_WINDOW_HEIGHT / 2, colSecShared + NCC_WINDOW_WIDTH / 2);
-            if (ncc > bestNCC) {
-                bestNCC = ncc;
-                bestMatchedColumn = colSecShared + columnwiseChunk * SHARED_MEM_BLOCK_SIZE;
-            }
-        }
     }
 
-    int colDiff = bestMatchedColumn - col;
-    if (colDiff < 0)
-        colDiff = -colDiff;
-    problem->res[problem->width * row + col] = colDiff;
+    if (cellInvalid)
+        return;
+
+    if (dispBest == INFTY)
+        problem->res[row * imgWidth + col] = 0.0;
+    else {
+        if (dispBest < 0)
+            dispBest = 0;
+        problem->res[row * imgWidth + col] = dispBest;
+    }
 }
 
 
-float* computeDisparityMapShared(unsigned char* img1, unsigned char* img2, int height, int width) {
+float* computeDisparityMapShared(Float3* img1, Float3* img2, int height, int width) {
     float* res;
     cudaMalloc(&res, sizeof(float) * height * width);
     Problem* problemGPU;
     Problem problemCPU(img1, img2, height, width, res);
     cudaMalloc(&problemGPU, sizeof(Problem));
     cudaMemcpy(problemGPU, &problemCPU, sizeof(Problem), cudaMemcpyHostToDevice);
+    double tStart = clock();
 
-    int numOfCells = height * width;
-    int threadDim = SHARED_MEM_BLOCK_SIZE;
-    dim3 threadDimension(threadDim, threadDim);
-    int numBlocks = (numOfCells + threadDim * threadDim - 1) / (threadDim * threadDim);
-    int blockCountX = (int)(sqrt(1.0 * numBlocks));
-    int blockCountY = (numBlocks + blockCountX - 1) / blockCountX;
-    dim3 blockDimension(blockCountX, blockCountY);
-    computeDisparityKernelShared<<<blockDimension, threadDimension>>>(problemGPU);
-
+    dim3 threadDim(BLOCK_SIZE, BLOCK_SIZE);
+    int blockCountX = (width + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int blockCountY = (height + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    dim3 blockDim(blockCountX, blockCountY);
+    disparityKernel<<<blockDim, threadDim>>>(problemGPU);
     cudaDeviceSynchronize();
+
+    double tEnd = clock();
+    printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
     float* resCPU = new float[height * width];
     cudaMemcpy(resCPU, res, sizeof(float) * height * width, cudaMemcpyDeviceToHost);
     cudaFree(res);

@@ -3,6 +3,9 @@
 #include <png.h>
 #include "libpng_wrapper.h"
 
+
+#define MAX_DISP 128
+
 png_byte color_type;
 png_byte bit_depth;
 png_bytep *row_pointers;
@@ -84,8 +87,7 @@ void writePNGFile(DoubleImage &img, char* fPath) {
 	DoubleImage sec;
 	sec.initFrom(img);
 //	int maxHeightWidth = img.height > img.width ? img.height : img.width;
-    double maxDisp = 200.0;
-	sec.scaleBy(255.0 / 200.0);
+	sec.scaleBy(255.0 / MAX_DISP);
 
 	int y;
 
