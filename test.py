@@ -153,15 +153,13 @@ def ncc_test(r, c1, c2):
     img1 = img1[r - hf_w_h: r + hf_w_h + 1, c1 - hf_w_w: c1 + hf_w_w + 1, :]
     img2 = img2[r - hf_w_h: r + hf_w_h + 1, c2 - hf_w_w: c2 + hf_w_w + 1, :]
 
-    print(' '.join(["{:.06}".format(elm) for elm in img2[:, :, 0].ravel().tolist()]))
+    # print(' '.join(["{:.06}".format(elm) for elm in img2[:, :, 0].ravel().tolist()]))
 
     # display_numpy_image(img1)
     # display_numpy_image(img2)
 
-
     ncc = get_ncc(img1, img2)
     print(ncc)
-
 
 
 if __name__ == "__main__":
@@ -170,4 +168,7 @@ if __name__ == "__main__":
     # test_disparity()
     # inv_sqrt_test()
     # dynamic_test()
-    ncc_test(170, 286, 191)
+    r = 5
+    c = 142
+    disp = 23
+    ncc_test(r, c, c - disp)

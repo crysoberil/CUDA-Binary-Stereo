@@ -21,7 +21,7 @@ public:
 
 
 __device__
-void getWindowMeanSTD(Problem* problem, unsigned char* colorArr, int centerRow, int centerCol, float *mean, float *std) {
+void getWindowMeanSTDCUDA(Problem* problem, unsigned char* colorArr, int centerRow, int centerCol, float *mean, float *std) {
     float windowSum[3] = {0.0, 0.0, 0.0};
     int windowSize = 0;
 
@@ -68,14 +68,14 @@ void getWindowMeanSTD(Problem* problem, unsigned char* colorArr, int centerRow, 
 
 
 __device__
-float computeNCC(Problem *problem, int row1, int col1, int row2, int col2) {
+float computeNCCCUDA(Problem *problem, int row1, int col1, int row2, int col2) {
     float ncc = 0.0;
     float mean1[3];
     float std1[3];
     float mean2[3];
     float std2[3];
-    getWindowMeanSTD(problem, problem->img1, row1, col1, mean1, std1);
-    getWindowMeanSTD(problem, problem->img2, row2, col2, mean2, std2);
+    getWindowMeanSTDCUDA(problem, problem->img1, row1, col1, mean1, std1);
+    getWindowMeanSTDCUDA(problem, problem->img2, row2, col2, mean2, std2);
     int halfWindow = problem->nccWindowSize / 2;
     int totalContribCount = 0;
     for (int rDel = -halfWindow; rDel <= halfWindow; rDel++) {
@@ -101,7 +101,7 @@ float computeNCC(Problem *problem, int row1, int col1, int row2, int col2) {
 
 
 __global__
-void computeDisparityKernel(Problem* problem) {
+void computeDisparityKernelCUDA(Problem* problem) {
     int linearIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if (linearIdx >= problem->height * problem->width)
         return;
@@ -113,7 +113,7 @@ void computeDisparityKernel(Problem* problem) {
     int bestColSec;
 
     for (int colSec = 0; colSec < problem->width; colSec++) {
-        float ncc = computeNCC(problem, row, col, row, colSec);
+        float ncc = computeNCCCUDA(problem, row, col, row, colSec);
         if (ncc > bestNCC) {
             bestNCC = ncc;
             bestColSec = colSec;
@@ -128,7 +128,7 @@ void computeDisparityKernel(Problem* problem) {
 }
 
 
-float* computeDisparityMap(unsigned char* img1, unsigned char* img2, int height, int width, int nccWindowSize) {
+float* computeDisparityMapCUDA(unsigned char* img1, unsigned char* img2, int height, int width, int nccWindowSize) {
     float* res;
     cudaMalloc(&res, sizeof(float) * height * width);
     Problem* problemGPU;
@@ -138,7 +138,7 @@ float* computeDisparityMap(unsigned char* img1, unsigned char* img2, int height,
     int numOfCells = height * width;
     int numThreads = 512;
     int numBlocks = (numOfCells + numThreads - 1) / numThreads;
-    computeDisparityKernel<<<numBlocks, numThreads>>>(problemGPU);
+    computeDisparityKernelCUDA<<<numBlocks, numThreads>>>(problemGPU);
     cudaDeviceSynchronize();
     float* resCPU = new float[height * width];
     cudaMemcpy(resCPU, res, sizeof(float) * height * width, cudaMemcpyDeviceToHost);

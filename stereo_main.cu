@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include "libpng_wrapper.h"
 #include "stereo_cpu.h"
-#include "stereo_cuda.h"
-#include "stereo_cuda_shared.h"
+//#include "stereo_cuda.h"
+//#include "stereo_cuda_shared.h"
+#include "stereo_cuda_3d.h"
 
 
 void testMiddleBuryCPU() {
@@ -51,7 +52,7 @@ void stereoGPU(char* img1Path, char* img2Path, char* resultPath) {
     int width = img1.width;
     Float3* colors1 = get_flattened_color_array(img1);
 	Float3* colors2 = get_flattened_color_array(img2);
-	float* res = computeDisparityMapShared(colors1, colors2, height, width);
+	float* res = computeDisparityMap3D(colors1, colors2, height, width);
     DoubleImage resImg;
 	resImg.init(height, width);
 	int k = 0;

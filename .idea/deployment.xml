@@ -5,7 +5,7 @@
       <paths name="sftp://jisan@vision41.cs.unc.edu:22/usr/bin/python3">
         <serverdata>
           <mappings>
-            <mapping deploy="/playpen/jisan/Regular/ClionProjects/Fall 18/CUDA Main/Stereo/src" local="$PROJECT_DIR$" />
+            <mapping deploy="/playpen/jisan/Regular/ClionProjects/Fall 18/CUDA Main/CUDA Stereo/src" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

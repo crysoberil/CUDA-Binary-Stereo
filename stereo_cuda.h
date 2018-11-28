@@ -5,7 +5,7 @@
 
 
 
-float* computeDisparityMap(unsigned char* img1, unsigned char* img2, int height, int width, int nccWindowSize);
+float* computeDisparityMapCUDA(unsigned char* img1, unsigned char* img2, int height, int width, int nccWindowSize);
 
 
 #endif
