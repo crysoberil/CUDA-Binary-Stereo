@@ -1,23 +1,19 @@
 #ifndef PNG_HEADER_H
 #define PNG_HEADER_H
 
-
 #include <stdio.h>
 
 
-class Image {
+class GrayscaleImage {
     void clearMemory() {
-        for (int i = 0; i < height; i++) {
-            for (int j = 0; j < width; j++)
-                delete[] img[i][j];
+        for (int i = 0; i < height; i++)
             delete[] img[i];
-        }
 	    if (height > 0)
 	        delete[] img;
     }
 
 public:
-    unsigned char ***img;
+    unsigned char **img;
     int height, width;
 
 
@@ -26,31 +22,22 @@ public:
 	    this->width = width;
 	    if (this->height <= 0 or this->width <= 0)
 	        return;
-	    img = new unsigned char**[height];
-	    for(int i = 0; i < height; i++) {
-	        img[i] = new unsigned char*[width];
-	        for (int j = 0; j < width; j++)
-	            img[i][j] = new unsigned char[3];
-	    }
+	    img = new unsigned char*[height];
+	    for(int i = 0; i < height; i++)
+	        img[i] = new unsigned char[width];
     }
 
-    Image() {
+    GrayscaleImage() {
         init(-1, -1);
     }
 
 
-	Image(int height, int width) {
+	GrayscaleImage(int height, int width) {
 	    init(height, width);
 	}
 
-	~Image() {
+	~GrayscaleImage() {
 	    clearMemory();
-	}
-
-	void loadColoredPixel(int row, int col, unsigned char r, unsigned char g, unsigned char b) {
-	    img[row][col][0] = r;
-	    img[row][col][1] = g;
-	    img[row][col][2] = b;
 	}
 
 	void displayStats() {
@@ -140,7 +127,7 @@ public:
 };
 
 
-void readPNGFile(Image &img, char* fPath);
+void readPNGFile(GrayscaleImage &img, char* fPath);
 
 void writePNGFile(DoubleImage &img, char* fPath);
 

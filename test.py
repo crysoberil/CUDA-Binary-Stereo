@@ -3,6 +3,7 @@ import numpy as np
 import skimage.transform
 import scipy.misc
 import cv2
+import skimage.color
 
 
 def display_numpy_image(img_numpy):
@@ -132,26 +133,26 @@ def dynamic_test():
 
 
 def get_ncc(p1, p2):
-    m1 = np.mean(p1, axis=(0, 1))[np.newaxis, np.newaxis, :]
-    m2 = np.mean(p2, axis=(0, 1))[np.newaxis, np.newaxis, :]
-    inv_std1 = 1.0 / np.std(p1, axis=(0, 1))[np.newaxis, np.newaxis, :]
-    inv_std2 = 1.0 / np.std(p2, axis=(0, 1))[np.newaxis, np.newaxis, :]
+    m1 = np.mean(p1)
+    m2 = np.mean(p2)
+    inv_std1 = 1.0 / np.std(p1)
+    inv_std2 = 1.0 / np.std(p2)
     terms = (p1 - m1) * (p2 - m2) * (inv_std1 * inv_std2)
     terms = terms.ravel()
     return terms.sum() / terms.shape[0]
 
 
 def ncc_test(r, c1, c2):
-    p1 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small.png"
-    p2 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small.png"
+    p1 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small_gr.png"
+    p2 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small_gr.png"
 
     img1 = load_image(p1) / 255.0
     img2 = load_image(p2) / 255.0
 
     hf_w_h, hf_w_w = 1, 3
 
-    img1 = img1[r - hf_w_h: r + hf_w_h + 1, c1 - hf_w_w: c1 + hf_w_w + 1, :]
-    img2 = img2[r - hf_w_h: r + hf_w_h + 1, c2 - hf_w_w: c2 + hf_w_w + 1, :]
+    img1 = img1[r - hf_w_h: r + hf_w_h + 1, c1 - hf_w_w: c1 + hf_w_w + 1]
+    img2 = img2[r - hf_w_h: r + hf_w_h + 1, c2 - hf_w_w: c2 + hf_w_w + 1]
 
     # print(' '.join(["{:.06}".format(elm) for elm in img2[:, :, 0].ravel().tolist()]))
 
@@ -160,6 +161,24 @@ def ncc_test(r, c1, c2):
 
     ncc = get_ncc(img1, img2)
     print(ncc)
+
+
+def generate_greyscale_img():
+    p1 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small.png"
+    p2 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small.png"
+
+    p3 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small_gr.png"
+    p4 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small_gr.png"
+
+    img1 = load_image(p1)
+    img2 = load_image(p2)
+
+    img1 = (skimage.color.rgb2gray(img1) * 255.0).astype(dtype=np.uint8)
+    img2 = (skimage.color.rgb2gray(img2) * 255.0).astype(dtype=np.uint8)
+
+    scipy.misc.imsave(p3, img1)
+    scipy.misc.imsave(p4, img2)
+
 
 
 if __name__ == "__main__":
@@ -172,3 +191,4 @@ if __name__ == "__main__":
     c = 142
     disp = 23
     ncc_test(r, c, c - disp)
+    # generate_greyscale_img()

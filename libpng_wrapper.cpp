@@ -10,11 +10,10 @@ png_byte color_type;
 png_byte bit_depth;
 png_bytep *row_pointers;
 
-void readPNGFile(Image &img, char* fPath) {
+void readPNGFile(GrayscaleImage &img, char* fPath) {
 	FILE *fp = fopen(fPath, "rb");
 
-	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL,
-			NULL);
+	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	if (!png)
 		abort();
 
@@ -26,7 +25,6 @@ void readPNGFile(Image &img, char* fPath) {
 		abort();
 
 	png_init_io(png, fp);
-
 	png_read_info(png, info);
 
 	int width = png_get_image_width(png, info);
@@ -52,12 +50,10 @@ void readPNGFile(Image &img, char* fPath) {
 		png_set_tRNS_to_alpha(png);
 
 	// These color_type don't have an alpha channel then fill it with 0xff.
-	if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY
-			|| color_type == PNG_COLOR_TYPE_PALETTE)
+	if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE)
 		png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
 
-	if (color_type == PNG_COLOR_TYPE_GRAY
-			|| color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+	if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
 		png_set_gray_to_rgb(png);
 
 	png_read_update_info(png, info);
@@ -71,10 +67,8 @@ void readPNGFile(Image &img, char* fPath) {
 
 	for (int i = 0; i < height; i++) {
 		for (int j = 0; j < width; j++) {
-			unsigned char r = row_pointers[i][j << 2];
-			unsigned char g = row_pointers[i][(j << 2) + 1];
-			unsigned char b = row_pointers[i][(j << 2) + 2];
-			img.loadColoredPixel(i, j, r, g, b);
+			unsigned char col = row_pointers[i][j << 2];
+			img.img[i][j] = col;
 		}
 		free(row_pointers[i]);
 	}
@@ -82,6 +76,7 @@ void readPNGFile(Image &img, char* fPath) {
 	free(row_pointers);
 	fclose(fp);
 }
+
 
 void writePNGFile(DoubleImage &img, char* fPath) {
 	DoubleImage sec;

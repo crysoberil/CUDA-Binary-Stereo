@@ -22,70 +22,11 @@
 #define INFTY (1 << 29)
 
 
-#define NUM_CHNL 3
-
-
-///////////////////////////////
 __device__
-Float3 operator*(Float3 &a, float b)
-{
-    // TODO: use make_float as in (https://stackoverflow.com/questions/26676806/efficiency-of-cuda-vector-types-float2-float3-float4)
-    Float3 res;
-    res.arr[0] = a.arr[0] * b;
-    res.arr[1] = a.arr[1] * b;
-    res.arr[2] = a.arr[2] * b;
-    return res;
-}
-
-
-__device__
-Float3 operator-(Float3 &a, Float3 &b)
-{
-    Float3 res;
-    res.arr[0] = a.arr[0] - b.arr[0];
-    res.arr[1] = a.arr[1] - b.arr[1];
-    res.arr[2] = a.arr[2] - b.arr[2];
-    return res;
-}
-
-
-__device__
-Float3 operator*(Float3 a, Float3 b)
-{
-    Float3 res;
-    res.arr[0] = a.arr[0] * b.arr[0];
-    res.arr[1] = a.arr[1] * b.arr[1];
-    res.arr[2] = a.arr[2] * b.arr[2];
-    return res;
-}
-
-__device__
-float reduceSum(Float3 &a) {
-    return a.arr[0] + a.arr[1] + a.arr[2];
-}
-
-__device__
-void resetValue(Float3 &a, float val) {
-    a.arr[0] = val;
-    a.arr[1] = val;
-    a.arr[2] = val;
-}
-
-__device__
-Float3& operator+=(Float3 &first, const Float3& sec) {
-    first.arr[0] += sec.arr[0];
-    first.arr[1] += sec.arr[1];
-    first.arr[2] += sec.arr[2];
-    return first;
-}
-///////////////////////////////
-
-
-__device__
-void loadMeanStd3d(Float3 *img, int rCenter, int cCenter, Float3 &mean, Float3 &invStd, int imgHeight, int imgWidth) {
-    Float3 sum;
-    resetValue(sum, 0.0);
+void loadMeanStd3d(float *img, int rCenter, int cCenter, float &mean, float &invStd, int imgHeight, int imgWidth) {
+    float sum = 0;
     int cnt = 0;
+
     for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
         if (r < 0 || r >= imgHeight)
             continue;
@@ -97,10 +38,9 @@ void loadMeanStd3d(Float3 *img, int rCenter, int cCenter, Float3 &mean, Float3 &
         }
     }
 
-    mean.f = (sum * (1.0 / cnt)).f;
+    mean = sum / cnt;
 
-    Float3 varSum, diff;
-    resetValue(varSum, 0.0);
+    float varSum, diff;
     for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
         if (r < 0 || r >= imgHeight)
             continue;
@@ -112,24 +52,22 @@ void loadMeanStd3d(Float3 *img, int rCenter, int cCenter, Float3 &mean, Float3 &
         }
     }
 
-    varSum.f = (varSum * (1.0 / cnt)).f;
-
-    for (int channel = 0; channel < NUM_CHNL; channel++)
-        invStd.arr[channel] = rsqrtf(varSum.arr[channel]);
+    varSum = varSum / cnt;
+    invStd = rsqrtf(varSum);
 }
 
 
 __device__
-float computeNCC3d(Float3 *img1, Float3 *img2, int r, int c1, int c2, int imgHeight, int imgWidth) {
-    Float3 mean1, mean2, invStd1, invStd2;
+float computeNCC3d(float *img1, float *img2, int r, int c1, int c2, int imgHeight, int imgWidth) {
+    float mean1, mean2, invStd1, invStd2;
     loadMeanStd3d(img1, r, c1, mean1, invStd1, imgHeight, imgWidth);
     loadMeanStd3d(img2, r, c2, mean2, invStd2, imgHeight, imgWidth);
-    Float3 invStdMult = invStd1 * invStd2;
+    float invStdMult = invStd1 * invStd2;
 
     float nccSum = 0.0;
     short itemCount = 0;
     int idx1, idx2;
-    Float3 nccTerm;
+    float nccTerm;
 
     for (int dr = -HF_NCC_HEIGHT; dr <= HF_NCC_HEIGHT; dr++) {
         if (r + dr < 0 || r + dr >= imgHeight)
@@ -140,8 +78,8 @@ float computeNCC3d(Float3 *img1, Float3 *img2, int r, int c1, int c2, int imgHei
             idx1 = (r + dr) * imgWidth + (c1 + dc);
             idx2 = (r + dr) * imgWidth + (c2 + dc);
             nccTerm = (img1[idx1] - mean1) * (img2[idx2] - mean2) * invStdMult;
-            nccSum += reduceSum(nccTerm);
-            itemCount += NUM_CHNL;
+            nccSum += nccTerm;
+            itemCount++;
         }
     }
 
@@ -151,23 +89,12 @@ float computeNCC3d(Float3 *img1, Float3 *img2, int r, int c1, int c2, int imgHei
 
 
 __global__
-void computeDisparitySet(Problem* problem) {
-    int blockRow = blockIdx.x;
-    int blockCol = blockIdx.y;
-    int blockDisp = blockIdx.z;
-    int threadRow = threadIdx.x;
-    int threadCol = threadIdx.y;
-    int threadDisp = threadIdx.z;
-
-    int row = blockRow * blockDim.x + threadRow;
-    int col = blockCol * blockDim.y + threadCol;
-    int disp = blockDisp * blockDim.z + threadDisp;
+void computeDisparityNCC(Problem* problem) {
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+    int disp = threadIdx.x;;
     int imgHeight = problem->height;
     int imgWidth = problem->width;
-
-    if (row >= imgHeight || col >= imgWidth || disp > MAX_DISP)
-        return;
-
     int nccSetIdx = row * imgWidth * MAX_DISP + col * MAX_DISP + disp;
 
     int rightImgCol = col - disp;
@@ -177,11 +104,35 @@ void computeDisparitySet(Problem* problem) {
     }
 
     float ncc = computeNCC3d(problem->img1, problem->img2, row, col, rightImgCol, imgHeight, imgWidth);
+
     problem->nccSet[nccSetIdx] = ncc;
 }
 
 
-float* computeDisparityMap3D(Float3* img1, Float3* img2, int height, int width) {
+__global__
+void computeDisparity(Problem* problem) {
+    int row = blockIdx.x;
+    int col = threadIdx.x;
+    int imgWidth = problem->width;
+
+    int nccSetOffset = row * imgWidth * MAX_DISP + col * MAX_DISP;
+    float* nccSet = problem->nccSet + nccSetOffset;
+
+    float bestNCC = -1e10;
+    int bestDisp = 0;
+
+    for (int i = 0; i < MAX_DISP; i++) {
+        if (nccSet[i] > bestNCC) {
+            bestNCC = nccSet[i];
+            bestDisp = i;
+        }
+    }
+
+    problem->res[row * imgWidth + col] = bestDisp;
+}
+
+
+float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
     float* res;
     float* nccSet;
     cudaMalloc(&res, sizeof(float) * height * width);
@@ -192,12 +143,14 @@ float* computeDisparityMap3D(Float3* img1, Float3* img2, int height, int width) 
     cudaMemcpy(problemGPU, &problemCPU, sizeof(Problem), cudaMemcpyHostToDevice);
     double tStart = clock();
 
-    dim3 threadDim(DISP_THREAD_DIM, DISP_THREAD_DIM, DISP_THREAD_DIM);
-    int blockCountX = (height + DISP_THREAD_DIM - 1) / DISP_THREAD_DIM;
-    int blockCountY = (width + DISP_THREAD_DIM - 1) / DISP_THREAD_DIM;
-    int blockCountZ = (MAX_DISP + DISP_THREAD_DIM - 1) / DISP_THREAD_DIM;
-    dim3 blockDim(blockCountX, blockCountY, blockCountZ);
-    computeDisparitySet<<<blockDim, threadDim>>>(problemGPU);
+    // Kernel 1
+    dim3 blockDim(MAX_DISP);
+    dim3 gridDim(width, height);
+    computeDisparityNCC<<<gridDim, blockDim>>>(problemGPU);
+    cudaDeviceSynchronize();
+
+    // Kernel 2
+    computeDisparity<<<height, width>>>(problemGPU);
     cudaDeviceSynchronize();
 
     double tEnd = clock();
@@ -208,3 +161,4 @@ float* computeDisparityMap3D(Float3* img1, Float3* img2, int height, int width) 
     cudaFree(problemGPU);
     return resCPU;
 }
+
