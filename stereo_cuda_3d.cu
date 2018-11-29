@@ -58,12 +58,16 @@ void loadMeanStd3d(float *img, int rCenter, int cCenter, float &mean, float &inv
 
 
 __device__
-float computeNCC3d(float *img1, float *img2, int r, int c1, int c2, int imgHeight, int imgWidth) {
-    float mean1, mean2, invStd1, invStd2;
-    loadMeanStd3d(img1, r, c1, mean1, invStd1, imgHeight, imgWidth);
-    loadMeanStd3d(img2, r, c2, mean2, invStd2, imgHeight, imgWidth);
-    float invStdMult = invStd1 * invStd2;
+float computeNCC3d(float *img1, float *img2, float* meanInvStdCache, int r, int c1, int c2, int imgHeight, int imgWidth) {
+    float* cache1 = meanInvStdCache + (r * imgWidth + c1) * 4;
+    float* cache2 = meanInvStdCache + (r * imgWidth + c2) * 4 + 2;
 
+    float mean1 = *cache1;
+    float mean2 = *cache2;
+    float invStd1 = cache1[1];
+    float invStd2 = cache2[1];
+
+    float invStdMult = invStd1 * invStd2;
     float nccSum = 0.0;
     short itemCount = 0;
     int idx1, idx2;
@@ -103,7 +107,7 @@ void computeDisparityNCC(Problem* problem) {
         return;
     }
 
-    float ncc = computeNCC3d(problem->img1, problem->img2, row, col, rightImgCol, imgHeight, imgWidth);
+    float ncc = computeNCC3d(problem->img1, problem->img2, problem->meanInvStdCache, row, col, rightImgCol, imgHeight, imgWidth);
 
     problem->nccSet[nccSetIdx] = ncc;
 }
@@ -132,24 +136,46 @@ void computeDisparity(Problem* problem) {
 }
 
 
+__global__
+void cacheMeanInvStd(Problem* problem) {
+    int row = blockIdx.x;
+    int col = threadIdx.x;
+    int imgWidth = problem->width;
+    float *cache = problem->meanInvStdCache + (row * imgWidth + col) * 4;
+    float mean1, invstd1, mean2, invstd2;
+    loadMeanStd3d(problem->img1, row, col, mean1, invstd1, problem->height, imgWidth);
+    loadMeanStd3d(problem->img2, row, col, mean2, invstd2, problem->height, imgWidth);
+    *cache = mean1;
+    cache[1] = invstd1;
+    cache[2] = mean2;
+    cache[3] = invstd2;
+}
+
+
 float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
     float* res;
     float* nccSet;
+    float* meanInvStdCache;
     cudaMalloc(&res, sizeof(float) * height * width);
     cudaMalloc(&nccSet, sizeof(float) * height * width * MAX_DISP);
+    cudaMalloc(&meanInvStdCache, sizeof(float) * height * width * 4);
     Problem* problemGPU;
-    Problem problemCPU(img1, img2, height, width, nccSet, res);
+    Problem problemCPU(img1, img2, height, width, nccSet, meanInvStdCache, res);
     cudaMalloc(&problemGPU, sizeof(Problem));
     cudaMemcpy(problemGPU, &problemCPU, sizeof(Problem), cudaMemcpyHostToDevice);
     double tStart = clock();
 
     // Kernel 1
+    cacheMeanInvStd<<<height, width>>>(problemGPU);
+    cudaDeviceSynchronize();
+
+    // Kernel 2
     dim3 blockDim(MAX_DISP);
     dim3 gridDim(width, height);
     computeDisparityNCC<<<gridDim, blockDim>>>(problemGPU);
     cudaDeviceSynchronize();
 
-    // Kernel 2
+    // Kernel 3
     computeDisparity<<<height, width>>>(problemGPU);
     cudaDeviceSynchronize();
 
@@ -157,6 +183,8 @@ float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
     printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
     float* resCPU = new float[height * width];
     cudaMemcpy(resCPU, res, sizeof(float) * height * width, cudaMemcpyDeviceToHost);
+    cudaFree(meanInvStdCache);
+    cudaFree(nccSet);
     cudaFree(res);
     cudaFree(problemGPU);
     return resCPU;
