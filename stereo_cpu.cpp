@@ -1,106 +1,171 @@
-//#include <math.h>
-//#include <stdio.h>
-//#include "stereo_cpu.h"
-//
-//
-//void BinaryStereoCPU::computeStereo(DoubleImage &resultContainer) {
-//    resultContainer.init(img1->height, img1->width);
-//    for (int i = 0; i < resultContainer.height; i++) {
-//        printf("Processing row: %d\n", i);
-//        for (int j = 0; j < resultContainer.width; j++) {
-//            int bestMatchedCol = findBestMatchingColumnInSecondImage(i, j);
-//            int disp = j - bestMatchedCol;
-//            if (disp < 0)
-//                disp = -disp;
-//            resultContainer.img[i][j] = disp;
-//        }
-//    }
-//}
-//
-//
-//int BinaryStereoCPU::findBestMatchingColumnInSecondImage(int row, int col1) {
-//    double bestNCC = -1e10;
-//    int bestCol2;
-//
-//    for (int col2 = 0; col2 < img2->width; col2++) {
-//        double ncc = computeNCC(row, col1, row, col2);
-//        if (ncc > bestNCC) {
-//            bestNCC = ncc;
-//            bestCol2 = col2;
-//        }
-//    }
-//
-//    return bestCol2;
-//}
-//
-//
-//double BinaryStereoCPU::computeNCC(int row1, int col1, int row2, int col2) {
-//    double ncc = 0.0;
-//    double mean1[3];
-//    double std1[3];
-//    double mean2[3];
-//    double std2[3];
-//    getWindowMeanSTD(img1, row1, col1, mean1, std1);
-//    getWindowMeanSTD(img2, row2, col2, mean2, std2);
-//    int halfWindow = nccWindowSize / 2;
-//    int totalContribCount = 0;
-//    for (int rDel = -halfWindow; rDel <= halfWindow; rDel++) {
-//        for (int cDel = -halfWindow; cDel <= halfWindow; cDel++) {
-//            int r1 = row1 + rDel;
-//            int c1 = col1 + cDel;
-//            int r2 = row2 + rDel;
-//            int c2 = col2 + cDel;
-//            if (r1 >= 0 && r1 < img1->height && c1 >= 0 && c1 < img1->width && r2 >= 0 && r2 < img2->height && c2 >= 0 && c2 < img2->width) {
-//                for (int channel = 0; channel < 3; channel++) {
-//                    double contrib = (img1->img[r1][c1][channel] - mean1[channel]) * (img2->img[r2][c2][channel] - mean2[channel]) / (std1[channel] * std2[channel]);
-//                    ncc += contrib / 3.0;  // To account for 3 channels.
-//                }
-//                totalContribCount++;
-//            }
-//        }
-//    }
-//    double avg = ncc / totalContribCount;
-//    return avg;
-//}
-//
-//
-//void BinaryStereoCPU::getWindowMeanSTD(Image *img, int centerRow, int centerCol, double *mean, double *std) {
-//    double windowSum[3] = {0.0, 0.0, 0.0};
-//    int windowSize = 0;
-//
-//    int halfWindow = nccWindowSize / 2;
-//    for (int r = centerRow - halfWindow; r <= centerRow + halfWindow; r++) {
-//        for (int c = centerCol - halfWindow; c <= centerCol + halfWindow; c++) {
-//            if (r >= 0 && r < img->height && c >= 0 && c < img->width) {
-//                for (int channel = 0; channel < 3; channel++) {
-//                    windowSum[channel] += img->img[r][c][channel];
-//                }
-//                windowSize++;
-//            }
-//        }
-//    }
-//
-//    // Compute average
-//    for (int channel = 0; channel < 3; channel++) {
-//        mean[channel] = windowSum[channel] / windowSize;
-//    }
-//
-//    double varSum[3] = {0.0, 0.0, 0.0};
-//
-//    for (int r = centerRow - halfWindow; r <= centerRow + halfWindow; r++) {
-//        for (int c = centerCol - halfWindow; c <= centerCol + halfWindow; c++) {
-//            if (r >= 0 && r < img->height && c >= 0 && c < img->width) {
-//                for (int channel = 0; channel < 3; channel++) {
-//                    double diff = img->img[r][c][channel] - mean[channel];
-//                    varSum[channel] += diff * diff;
-//                }
-//            }
-//        }
-//    }
-//
-//    for (int channel = 0; channel < 3; channel++) {
-//        std[channel] = sqrt(varSum[channel] / windowSize);
-//        if (std[channel] < 1e-5)
-//            std[channel] = 1e-5;
-//    }
-//}
+#include <math.h>
+#include <stdio.h>
+#include <time.h>
+#include <vector_functions.h>
+#include "stereo_cpu.h"
+#include <math.h>
+
+
+//#define BLOCK_SIZE 32
+#define NCC_HEIGHT 3
+#define NCC_WIDTH 7
+#define HF_NCC_HEIGHT (NCC_HEIGHT / 2)
+#define HF_NCC_WIDTH (NCC_WIDTH / 2)
+#define MAX_DISP 128
+#define INFTY (1 << 29)
+
+
+void loadMeanStdCPU(float *img, int rCenter, int cCenter, float &mean, float &invStd, int imgHeight, int imgWidth) {
+    float sum = 0;
+    int cnt = 0;
+
+    for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
+        if (r < 0 || r >= imgHeight)
+            continue;
+        for (int c = cCenter - HF_NCC_WIDTH; c <= cCenter + HF_NCC_WIDTH; c++) {
+            if (c < 0 || c >= imgWidth)
+                continue;
+            sum += img[r * imgWidth + c];
+            cnt++;
+        }
+    }
+
+    mean = sum / cnt;
+
+    float varSum, diff;
+    for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
+        if (r < 0 || r >= imgHeight)
+            continue;
+        for (int c = cCenter - HF_NCC_WIDTH; c <= cCenter + HF_NCC_WIDTH; c++) {
+            if (c < 0 || c >= imgWidth)
+                continue;
+            diff = img[r * imgWidth + c] - mean;
+            varSum += (diff * diff);
+        }
+    }
+
+    varSum = varSum / cnt;
+    invStd = 1.0 / sqrt(varSum);
+}
+
+
+float computeNCCCPU(float *img1, float *img2, float* meanInvStdCache, int r, int c1, int c2, int imgHeight, int imgWidth) {
+    float* cache1 = meanInvStdCache + (r * imgWidth + c1) * 4;
+    float* cache2 = meanInvStdCache + (r * imgWidth + c2) * 4 + 2;
+
+    float mean1 = *cache1;
+    float mean2 = *cache2;
+    float invStd1 = cache1[1];
+    float invStd2 = cache2[1];
+
+    float invStdMult = invStd1 * invStd2;
+    float nccSum = 0.0;
+    short itemCount = 0;
+    int idx1, idx2;
+    float nccTerm;
+
+    for (int dr = -HF_NCC_HEIGHT; dr <= HF_NCC_HEIGHT; dr++) {
+        if (r + dr < 0 || r + dr >= imgHeight)
+            continue;
+        for (int dc = -HF_NCC_WIDTH; dc <= HF_NCC_WIDTH; dc++) {
+            if (c1 + dc < 0 || c2 + dc < 0 || c1 + dc >= imgWidth || c2 + dc >= imgWidth)
+                continue;
+            idx1 = (r + dr) * imgWidth + (c1 + dc);
+            idx2 = (r + dr) * imgWidth + (c2 + dc);
+            nccTerm = (img1[idx1] - mean1) * (img2[idx2] - mean2) * invStdMult;
+            nccSum += nccTerm;
+            itemCount++;
+        }
+    }
+
+    float ncc = nccSum / itemCount;
+    return ncc;
+}
+
+
+void computeDisparityNCCCPU(ProblemCPU* problem) {
+    int imgHeight = problem->height;
+    int imgWidth = problem->width;
+
+    for (int row = 0; row < problem->height; row++) {
+        for (int col = 0; col < problem->width; col++) {
+            for (int disp = 0; disp < MAX_DISP; disp++) {
+                int nccSetIdx = row * imgWidth * MAX_DISP + col * MAX_DISP + disp;
+                int rightImgCol = col - disp;
+                if (rightImgCol < 0 || rightImgCol >= imgWidth) {
+                    problem->nccSet[nccSetIdx] = -INFTY;
+                    continue;
+                }
+                float ncc = computeNCCCPU(problem->img1, problem->img2, problem->meanInvStdCache, row, col, rightImgCol, imgHeight, imgWidth);
+                problem->nccSet[nccSetIdx] = ncc;
+            }
+        }
+    }
+}
+
+
+void computeDisparity(ProblemCPU* problem) {
+    int imgWidth = problem->width;
+
+    for (int row = 0; row < problem->height; row++) {
+        for (int col = 0; col < problem->width; col++) {
+            int nccSetOffset = row * imgWidth * MAX_DISP + col * MAX_DISP;
+            float* nccSet = problem->nccSet + nccSetOffset;
+
+            float bestNCC = -1e10;
+            int bestDisp = 0;
+
+            for (int i = 0; i < MAX_DISP; i++) {
+                if (nccSet[i] > bestNCC) {
+                    bestNCC = nccSet[i];
+                    bestDisp = i;
+                }
+            }
+
+            problem->res[row * imgWidth + col] = bestDisp;
+        }
+    }
+}
+
+
+void cacheMeanInvStdCPU(ProblemCPU* problem) {
+    int imgWidth = problem->width;
+
+    for (int row = 0; row < problem->height; row++) {
+        for (int col = 0; col < problem->width; col++) {
+            float *cache = problem->meanInvStdCache + (row * imgWidth + col) * 4;
+            float mean1, invstd1, mean2, invstd2;
+            loadMeanStdCPU(problem->img1, row, col, mean1, invstd1, problem->height, imgWidth);
+            loadMeanStdCPU(problem->img2, row, col, mean2, invstd2, problem->height, imgWidth);
+            *cache = mean1;
+            cache[1] = invstd1;
+            cache[2] = mean2;
+            cache[3] = invstd2;
+        }
+    }
+}
+
+
+float* computeDisparityMapCPU(float* img1, float* img2, int height, int width) {
+    float* res = new float[height * width];
+    float* nccSet = new float[height * width * MAX_DISP];
+    float* meanInvStdCache = new float[height * width * 4];
+    ProblemCPU problem(img1, img2, height, width, nccSet, meanInvStdCache, res);
+    double tStart = clock();
+
+    // Kernel 1 - sequential
+    cacheMeanInvStdCPU(&problem);
+
+    // Kernel 2 - sequential
+    computeDisparityNCCCPU(&problem);
+
+    // Kernel 3 - sequential
+    computeDisparity(&problem);
+
+    double tEnd = clock();
+    printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
+    delete[] nccSet;
+    delete[] meanInvStdCache;
+
+    return res;
+}

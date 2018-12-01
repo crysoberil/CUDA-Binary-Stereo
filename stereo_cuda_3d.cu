@@ -144,6 +144,8 @@ void computeDisparityNCC(Problem* problem) {
     int rightImgCol = col - disp;
     if (rightImgCol < 0 || rightImgCol >= imgWidth) {
         problem->nccSet[nccSetIdx] = -INFTY;
+        __syncthreads();
+        __syncthreads();
         return;
     }
 
@@ -160,6 +162,8 @@ void computeDisparityNCC(Problem* problem) {
 
 __global__
 void computeDisparity(Problem* problem) {
+    // Reduce with shared memory here in log(n) steps.
+
     int row = blockIdx.x;
     int col = threadIdx.x;
     int imgWidth = problem->width;
