@@ -2,11 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="acb5c7f6-fc4c-4ce8-a1dc-f48def476f64" name="Default" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/stereo_cpu.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/stereo_cpu.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/stereo_cuda_3d.cu" beforeDir="false" afterPath="$PROJECT_DIR$/stereo_cuda_3d.cu" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/stereo_main.cu" beforeDir="false" afterPath="$PROJECT_DIR$/stereo_main.cu" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -23,8 +19,11 @@
       <file leaf-file-name="stereo_cuda_3d.cu" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/stereo_cuda_3d.cu">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="437">
-              <caret line="226" column="59" selection-start-line="226" selection-start-column="59" selection-end-line="226" selection-end-column="59" />
+            <state relative-caret-position="312">
+              <caret line="226" column="57" selection-start-line="226" selection-start-column="57" selection-end-line="226" selection-end-column="57" />
+              <folding>
+                <element signature="e#0#7278#0" />
+              </folding>
             </state>
           </provider>
         </entry>
@@ -705,8 +704,11 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/stereo_cuda_3d.cu">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="437">
-          <caret line="226" column="59" selection-start-line="226" selection-start-column="59" selection-end-line="226" selection-end-column="59" />
+        <state relative-caret-position="312">
+          <caret line="226" column="57" selection-start-line="226" selection-start-column="57" selection-end-line="226" selection-end-column="57" />
+          <folding>
+            <element signature="e#0#7278#0" />
+          </folding>
         </state>
       </provider>
     </entry>

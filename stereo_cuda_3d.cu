@@ -97,7 +97,6 @@ float computeNCC3d(float buff1[][NCC_WIDTH], float buff2[NCC_HEIGHT][NCC_WIDTH +
 }
 
 
-// Internally synced
 __device__
 void loadIntoBuffer1(float* img, float buff[][NCC_WIDTH], int row, int col, int imgHeight, int imgWidth) {
     if (threadIdx.x == 0) {
@@ -116,7 +115,6 @@ void loadIntoBuffer1(float* img, float buff[][NCC_WIDTH], int row, int col, int 
 }
 
 
-// Internally synced
 __device__
 void loadIntoBuffer2(float* img, float buff[NCC_HEIGHT][NCC_WIDTH + MAX_DISP], int row, int col, int imgHeight, int imgWidth) {
     int cMin = col - MAX_DISP - HF_NCC_WIDTH;
@@ -166,8 +164,7 @@ void computeDisparityNCC(Problem* problem) {
 
 __global__
 void computeDisparity(Problem* problem) {
-    // Reduce with shared memory here in log(n) steps.
-
+    // Reduce with shared memory here in log(MAX_DISP) steps.
     int row = blockIdx.x;
     int col = threadIdx.x;
     int imgWidth = problem->width;
@@ -205,6 +202,38 @@ void cacheMeanInvStd(Problem* problem) {
 }
 
 
+__global__
+void computeDisparityParallelReduction(Problem* problem) {
+    int row = blockIdx.y;
+    int col = blockIdx.x;
+    int threadNo = threadIdx.x;
+    int imgWidth = problem->width;
+    int idxOffset = (row * imgWidth + col) * MAX_DISP;
+    float* nccSet = problem->nccSet;
+    int numThreads = blockDim.x;
+
+    __shared__ float bestNCC[MAX_DISP];
+    __shared__ int bestWho[MAX_DISP];
+
+    bestNCC[threadNo] = nccSet[idxOffset + threadNo];
+    bestWho[threadNo] = threadNo;
+    bestNCC[threadNo + numThreads] = nccSet[idxOffset + numThreads + threadNo];
+    bestWho[threadNo + numThreads] = threadNo + numThreads;
+    __syncthreads();
+
+    for (int stride = numThreads; stride > 0; stride >>= 1) {
+        if (threadNo < stride && bestNCC[threadNo] < bestNCC[threadNo + stride]) {
+            bestNCC[threadNo] = bestNCC[threadNo + stride];
+            bestWho[threadNo] = bestWho[threadNo + stride];
+        }
+        __syncthreads();
+    }
+
+    if (!threadNo)
+        problem->res[row * imgWidth + col] = bestWho[0];
+}
+
+
 float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
     float* res;
     float* nccSet;
@@ -227,7 +256,8 @@ float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
     computeDisparityNCC<<<gridDim, blockDim>>>(problemGPU);
 
     // Kernel 3
-    computeDisparity<<<height, width>>>(problemGPU);
+    computeDisparityParallelReduction<<<gridDim, (MAX_DISP + 1) / 2>>>(problemGPU);
+//    computeDisparity<<<height, width>>>(problemGPU);
     cudaDeviceSynchronize();
 
     double tEnd = clock();
