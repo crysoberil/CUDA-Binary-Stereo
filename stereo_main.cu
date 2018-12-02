@@ -98,7 +98,7 @@ void testMiddleBuryGPU() {
 
 
 int main() {
-    testMiddleBuryCPU();
-//    testMiddleBuryGPU();
+//    testMiddleBuryCPU();
+    testMiddleBuryGPU();
 	return 0;
 }

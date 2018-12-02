@@ -40,7 +40,8 @@ void loadMeanStd3d(float *img, int rCenter, int cCenter, float &mean, float &inv
 
     mean = sum / cnt;
 
-    float varSum, diff;
+    double varSum = 0.0;
+    float diff;
     for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
         if (r < 0 || r >= imgHeight)
             continue;
@@ -52,8 +53,12 @@ void loadMeanStd3d(float *img, int rCenter, int cCenter, float &mean, float &inv
         }
     }
 
-    varSum = varSum / cnt;
-    invStd = rsqrtf(varSum);
+    if (varSum < 1e-5 && varSum > -1e-5)
+        invStd = 1e-5;
+    else {
+        varSum = varSum / cnt;
+        invStd = rsqrt(varSum);
+    }
 }
 
 
@@ -69,7 +74,7 @@ float computeNCC3d(float buff1[][NCC_WIDTH], float buff2[NCC_HEIGHT][NCC_WIDTH +
 
     float invStdMult = invStd1 * invStd2;
     float nccSum = 0.0;
-    short itemCount = 0;
+    int itemCount = 0;
     float nccTerm;
 
     int disp = threadIdx.x;
@@ -79,8 +84,10 @@ float computeNCC3d(float buff1[][NCC_WIDTH], float buff2[NCC_HEIGHT][NCC_WIDTH +
             int bc2 = bc + (MAX_DISP - disp);
             if (buff1[br][bc] > -0.5 && buff2[br][bc2] > -0.5) {
                 nccTerm = (buff1[br][bc] - mean1) * (buff2[br][bc2] - mean2) * invStdMult;
-                nccSum += nccTerm;
-                itemCount++;
+                if (nccTerm > -1e2) {
+                    nccSum += nccTerm;
+                    itemCount++;
+                }
             }
         }
     }
@@ -106,8 +113,6 @@ void loadIntoBuffer1(float* img, float buff[][NCC_WIDTH], int row, int col, int 
             }
         }
     }
-
-    __syncthreads();
 }
 
 
@@ -127,8 +132,6 @@ void loadIntoBuffer2(float* img, float buff[NCC_HEIGHT][NCC_WIDTH + MAX_DISP], i
                 buff[r - (row - HF_NCC_HEIGHT)][c - cMin] = -1.0;
         }
     }
-
-    __syncthreads();
 }
 
 
@@ -136,27 +139,28 @@ __global__
 void computeDisparityNCC(Problem* problem) {
     int row = blockIdx.y;
     int col = blockIdx.x;
-    int disp = threadIdx.x;;
+    int disp = threadIdx.x;
     int imgHeight = problem->height;
     int imgWidth = problem->width;
     int nccSetIdx = row * imgWidth * MAX_DISP + col * MAX_DISP + disp;
 
     int rightImgCol = col - disp;
-    if (rightImgCol < 0 || rightImgCol >= imgWidth) {
+    bool cellIsValid = rightImgCol >= 0 && rightImgCol < imgWidth;
+    if (!cellIsValid)
         problem->nccSet[nccSetIdx] = -INFTY;
-        __syncthreads();
-        __syncthreads();
-        return;
-    }
 
     __shared__ float buff1[NCC_HEIGHT][NCC_WIDTH];
     __shared__ float buff2[NCC_HEIGHT][NCC_WIDTH + MAX_DISP];
 
-    loadIntoBuffer1(problem->img1, buff1, row, col, imgHeight, imgWidth);
-    loadIntoBuffer2(problem->img2, buff2, row, col, imgHeight, imgWidth);
+    loadIntoBuffer1(problem->img1, buff1, row, col, imgHeight, imgWidth); // Regardless of whether cell is valid or not.
+    loadIntoBuffer2(problem->img2, buff2, row, col, imgHeight, imgWidth); // Regardless of whether cell is valid or not.
 
-    float ncc = computeNCC3d(buff1, buff2, problem->meanInvStdCache, row, col, rightImgCol, imgHeight, imgWidth);
-    problem->nccSet[nccSetIdx] = ncc;
+    __syncthreads();
+
+    if (cellIsValid) {
+        float ncc = computeNCC3d(buff1, buff2, problem->meanInvStdCache, row, col, rightImgCol, imgHeight, imgWidth);
+        problem->nccSet[nccSetIdx] = ncc;
+    }
 }
 
 
@@ -216,13 +220,11 @@ float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
 
     // Kernel 1
     cacheMeanInvStd<<<height, width>>>(problemGPU);
-    cudaDeviceSynchronize();
 
     // Kernel 2
     dim3 blockDim(MAX_DISP);
     dim3 gridDim(width, height);
     computeDisparityNCC<<<gridDim, blockDim>>>(problemGPU);
-    cudaDeviceSynchronize();
 
     // Kernel 3
     computeDisparity<<<height, width>>>(problemGPU);

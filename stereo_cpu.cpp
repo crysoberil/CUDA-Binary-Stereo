@@ -32,7 +32,7 @@ void loadMeanStdCPU(float *img, int rCenter, int cCenter, float &mean, float &in
 
     mean = sum / cnt;
 
-    float varSum, diff;
+    double varSum, diff;
     for (int r = rCenter - HF_NCC_HEIGHT; r <= rCenter + HF_NCC_HEIGHT; r++) {
         if (r < 0 || r >= imgHeight)
             continue;
@@ -44,8 +44,12 @@ void loadMeanStdCPU(float *img, int rCenter, int cCenter, float &mean, float &in
         }
     }
 
-    varSum = varSum / cnt;
-    invStd = 1.0 / sqrt(varSum);
+    if (varSum < 1e-5 && varSum > -1e-5)
+        invStd = 1e-5;
+    else {
+        varSum = varSum / cnt;
+        invStd = 1.0 / sqrt(varSum);
+    }
 }
 
 

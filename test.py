@@ -187,8 +187,8 @@ if __name__ == "__main__":
     # test_disparity()
     # inv_sqrt_test()
     # dynamic_test()
-    r = 5
-    c = 142
-    disp = 23
+    r = 13
+    c = 83
+    disp = 83 - 34
     ncc_test(r, c, c - disp)
     # generate_greyscale_img()
