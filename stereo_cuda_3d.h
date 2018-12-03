@@ -23,6 +23,6 @@ public:
 };
 
 
-float* computeDisparityMap3D(float* img1, float* img2, int height, int width);
+float* computeDisparityMap3D(float* img1, float* img2, int height, int width, float* meanInvStdCache, float* nccSet, float* res);
 
 #endif

@@ -5,8 +5,7 @@
 #include "stereo_cuda_3d.h"
 
 
-#define USE_NCC 1
-#define USE_SQRT_APPROX 1
+#define DISPLAY_KERNEL_CALL_TIME 0
 
 #define DISP_THREAD_DIM 8
 
@@ -234,18 +233,14 @@ void computeDisparityParallelReduction(Problem* problem) {
 }
 
 
-float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
-    float* res;
-    float* nccSet;
-    float* meanInvStdCache;
-    cudaMalloc(&res, sizeof(float) * height * width);
-    cudaMalloc(&nccSet, sizeof(float) * height * width * MAX_DISP);
-    cudaMalloc(&meanInvStdCache, sizeof(float) * height * width * 4);
+float* computeDisparityMap3D(float* img1, float* img2, int height, int width, float* meanInvStdCache, float* nccSet, float* res) {
     Problem* problemGPU;
     Problem problemCPU(img1, img2, height, width, nccSet, meanInvStdCache, res);
     cudaMalloc(&problemGPU, sizeof(Problem));
     cudaMemcpy(problemGPU, &problemCPU, sizeof(Problem), cudaMemcpyHostToDevice);
-    double tStart = clock();
+    #if (DISPLAY_KERNEL_CALL_TIME)
+        double tStart = clock();
+    #endif
 
     // Kernel 1
     cacheMeanInvStd<<<height, width>>>(problemGPU);
@@ -260,13 +255,13 @@ float* computeDisparityMap3D(float* img1, float* img2, int height, int width) {
 //    computeDisparity<<<height, width>>>(problemGPU);
     cudaDeviceSynchronize();
 
-    double tEnd = clock();
-    printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
+    #if (DISPLAY_KERNEL_CALL_TIME)
+        double tEnd = clock();
+        printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
+    #endif
+
     float* resCPU = new float[height * width];
     cudaMemcpy(resCPU, res, sizeof(float) * height * width, cudaMemcpyDeviceToHost);
-    cudaFree(meanInvStdCache);
-    cudaFree(nccSet);
-    cudaFree(res);
     cudaFree(problemGPU);
     return resCPU;
 }

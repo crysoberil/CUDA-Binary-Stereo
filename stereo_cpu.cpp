@@ -155,7 +155,6 @@ float* computeDisparityMapCPU(float* img1, float* img2, int height, int width) {
     float* nccSet = new float[height * width * MAX_DISP];
     float* meanInvStdCache = new float[height * width * 4];
     ProblemCPU problem(img1, img2, height, width, nccSet, meanInvStdCache, res);
-    double tStart = clock();
 
     // Kernel 1 - sequential
     cacheMeanInvStdCPU(&problem);
@@ -166,8 +165,6 @@ float* computeDisparityMapCPU(float* img1, float* img2, int height, int width) {
     // Kernel 3 - sequential
     computeDisparity(&problem);
 
-    double tEnd = clock();
-    printf("Kernel call took %.2lf ms.\n", (tEnd - tStart) / CLOCKS_PER_SEC * 1000.0);
     delete[] nccSet;
     delete[] meanInvStdCache;
 
