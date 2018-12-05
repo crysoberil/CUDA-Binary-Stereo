@@ -163,7 +163,7 @@ void computeDisparityNCC(Problem* problem) {
 
 __global__
 void computeDisparity(Problem* problem) {
-    // Reduce with shared memory here in log(MAX_DISP) steps.
+    // Sequential reduction per pixel.
     int row = blockIdx.x;
     int col = threadIdx.x;
     int imgWidth = problem->width;
@@ -203,6 +203,7 @@ void cacheMeanInvStd(Problem* problem) {
 
 __global__
 void computeDisparityParallelReduction(Problem* problem) {
+    // Parallel reduction per pixel.
     int row = blockIdx.y;
     int col = blockIdx.x;
     int threadNo = threadIdx.x;

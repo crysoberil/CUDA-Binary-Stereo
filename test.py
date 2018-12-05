@@ -164,11 +164,11 @@ def ncc_test(r, c1, c2):
 
 
 def generate_greyscale_img():
-    p1 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small.png"
-    p2 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small.png"
+    p1 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1.png"
+    p2 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5.png"
 
-    p3 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small_gr.png"
-    p4 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small_gr.png"
+    p3 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_gr.png"
+    p4 = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_gr.png"
 
     img1 = load_image(p1)
     img2 = load_image(p2)
@@ -187,8 +187,8 @@ if __name__ == "__main__":
     # test_disparity()
     # inv_sqrt_test()
     # dynamic_test()
-    r = 13
-    c = 83
-    disp = 83 - 34
-    ncc_test(r, c, c - disp)
-    # generate_greyscale_img()
+    # r = 13
+    # c = 83
+    # disp = 83 - 34
+    # ncc_test(r, c, c - disp)
+    generate_greyscale_img()

@@ -139,25 +139,25 @@ void stereoGPU(char* img1Path, char* img2Path, char* resultPath, int testCases, 
 
 
 void testMiddleBuryCPU() {
-    char s1[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small_gr.png";
-	char s2[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small_gr.png";
-	char s3[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/out_cpu.png";
+    char s1[] = "./resources/img_left.png";
+	char s2[] = "./resources/img_right.png";
+	char s3[] = "./resources/out_cpu.png";
 	stereoCPU(s1, s2, s3, 1, true, false);
 	stereoCPU(s1, s2, s3, 20, false, true);
 }
 
 
 void testMiddleBuryGPU() {
-    char s1[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view1_small_gr.png";
-	char s2[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/view5_small_gr.png";
-	char s3[] = "/playpen2/jisan/workspace/Datasets/Middlebury/Art/out_gpu.png";
+    char s1[] = "./resources/img_left.png";
+	char s2[] = "./resources/img_right.png";
+	char s3[] = "./resources/out_gpu.png";
 	stereoGPU(s1, s2, s3, 1, true, false);
-	stereoGPU(s1, s2, s3, 1000, false, false);
+	stereoGPU(s1, s2, s3, 1000, false, true);
 }
 
 
 int main() {
-    testMiddleBuryCPU();
-//    testMiddleBuryGPU();
+//    testMiddleBuryCPU();
+    testMiddleBuryGPU();
 	return 0;
 }
